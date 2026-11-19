@@ -9,6 +9,12 @@ const handleRemixRequest = createRequestHandler(build as any as ServerBuild);
 
 export default {
   async fetch(request, env, ctx) {
+    // The Vite build ships the full route manifest.
+    if (new URL(request.url).pathname === "/__manifest") {
+      return new Response("Not Found", { status: 404 });
+    }
+
+    let response: Response;
     try {
       const loadContext = getLoadContext({
         request,
@@ -28,10 +34,21 @@ export default {
           },
         },
       });
-      return await handleRemixRequest(request, loadContext);
-    } catch (error) {
-      console.log(error);
-      return new Response("An unexpected error occurred", { status: 500 });
+      response = await handleRemixRequest(request, loadContext);
+    } catch {
+      console.error("Worker request failed");
+      response = new Response("An unexpected error occurred", { status: 500 });
     }
+
+    const headers = new Headers(response.headers);
+    headers.set("Cache-Control", "private, no-store");
+    headers.set("Referrer-Policy", "strict-origin");
+    headers.set("X-Content-Type-Options", "nosniff");
+    headers.set("X-Frame-Options", "DENY");
+    return new Response(response.body, {
+      status: response.status,
+      statusText: response.statusText,
+      headers,
+    });
   },
 } satisfies ExportedHandler<Env>;

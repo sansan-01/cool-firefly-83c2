@@ -5,6 +5,22 @@ interface Todo {
   createdAt: number;
 }
 
+const MAX_TODOS_PER_LIST = 500;
+
+export class TodoListFullError extends Error {}
+export class TodoNotFoundError extends Error {}
+
+function isTodo(value: unknown): value is Todo {
+  if (typeof value !== "object" || value === null) return false;
+  const todo = value as Partial<Todo>;
+  return (
+    typeof todo.id === "string" &&
+    typeof todo.text === "string" &&
+    typeof todo.completed === "boolean" &&
+    Number.isFinite(todo.createdAt)
+  );
+}
+
 /**
  * TodoManager handles all interactions with the Todos KV store.
  * This class provides CRUD operations for managing todo items in Cloudflare KV storage.
@@ -29,11 +45,13 @@ export class TodoManager {
    * @returns Promise containing an array of Todo items, sorted by creation date (newest first)
    */
   async list(): Promise<Todo[]> {
-    const todos = await this.kv.get(this.todosKey, "json");
-    if (Array.isArray(todos)) {
-      todos.sort((a: Todo, b: Todo) => b.createdAt - a.createdAt);
+    const stored = await this.kv.get(this.todosKey, "text");
+    if (stored === null) return [];
+    const todos: unknown = JSON.parse(stored);
+    if (!Array.isArray(todos) || !todos.every(isTodo)) {
+      throw new Error("Invalid stored todo list");
     }
-    return (todos || []) as Todo[];
+    return todos.sort((a, b) => b.createdAt - a.createdAt);
   }
 
   /**
@@ -42,13 +60,16 @@ export class TodoManager {
    * @returns Promise containing the newly created Todo item
    */
   async create(text: string): Promise<Todo> {
+    const todos = await this.list();
+    if (todos.length >= MAX_TODOS_PER_LIST) {
+      throw new TodoListFullError("Todo list is full");
+    }
     const newTodo: Todo = {
       id: crypto.randomUUID(),
       text,
       completed: false,
       createdAt: Date.now(),
     };
-    const todos = await this.list();
     todos.push(newTodo);
     await this.kv.put(this.todosKey, JSON.stringify(todos), {
       expirationTtl: 300,
@@ -66,7 +87,7 @@ export class TodoManager {
     const todos = await this.list();
     const todoIndex = todos.findIndex((todo) => todo.id === id);
     if (todoIndex === -1) {
-      throw new Error(`Todo with id ${id} not found`);
+      throw new TodoNotFoundError("Todo not found");
     }
     todos[todoIndex].completed = !todos[todoIndex].completed;
     await this.kv.put(this.todosKey, JSON.stringify(todos), {
@@ -83,6 +104,7 @@ export class TodoManager {
   async delete(id: string): Promise<void> {
     const todos = await this.list();
     const newTodos = todos.filter((todo) => todo.id !== id);
+    if (newTodos.length === todos.length) return;
     await this.kv.put(this.todosKey, JSON.stringify(newTodos), {
       expirationTtl: 300,
     });

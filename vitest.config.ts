@@ -5,8 +5,8 @@ export default defineWorkersConfig({
   test: {
     include: ["test/**/*.test.ts"],
     poolOptions: {
-      singleWorker: true,
       workers: {
+        singleWorker: true,
         miniflare: {
           compatibilityFlags: wranglerConfig.compatibility_flags,
           compatibilityDate: wranglerConfig.compatibility_date,

@@ -11,6 +11,10 @@ import { renderToReadableStream } from "react-dom/server";
 
 const ABORT_DELAY = 5000;
 
+export function handleError() {
+  console.error("Remix request failed");
+}
+
 export default async function handleRequest(
   request: Request,
   responseStatusCode: number,
@@ -34,19 +38,21 @@ export default async function handleRequest(
     />,
     {
       signal: controller.signal,
-      onError(error: unknown) {
+      onError() {
         if (!controller.signal.aborted) {
           // Log streaming rendering errors from inside the shell
-          console.error(error);
+          console.error("Remix document rendering failed");
         }
         responseStatusCode = 500;
       },
     },
-  );
-
-  void body.allReady.then(() => {
+  ).catch((error: unknown) => {
     clearTimeout(timeoutId);
+    throw error;
   });
+
+  const clearAbortTimeout = () => clearTimeout(timeoutId);
+  void body.allReady.then(clearAbortTimeout, clearAbortTimeout);
 
   if (isbot(request.headers.get("user-agent") || "")) {
     await body.allReady;
